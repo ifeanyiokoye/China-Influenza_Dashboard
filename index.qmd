@@ -1,0 +1,181 @@
+---
+title: "Influenza A H7N9 in China, 2013"
+format: dashboard
+theme: lux
+---
+
+```{r}
+# Load packages 
+if(!require(pacman)) install.packages("pacman")
+pacman::p_load(tidyverse, outbreaks, bslib, bsicons, shiny, 
+               rgeoboundaries, plotly, htmltools, reactable, here, sf, ggspatial)
+
+# view data
+# head(outbreaks::fluH7N9_china_2013)
+```
+
+
+
+
+```{r}
+total_cases <- count(fluH7N9_china_2013)
+
+total_hosp <- sum(!is.na(fluH7N9_china_2013$date_of_hospitalisation))
+
+total_deaths <- count(
+                    fluH7N9_china_2013 %>% 
+                    select(outcome) %>% 
+                    filter(outcome == "Death")
+                    )
+
+cases_by_prov <- fluH7N9_china_2013 %>% 
+  group_by(province) %>% 
+  summarise(cases = n()) %>% 
+  filter(cases > 0) %>% 
+  mutate(tooltip_label = paste(province,
+                               cases,
+                               sep = ": ")) %>% 
+  ggplot(
+    aes(
+      y = reorder(province, cases),
+      x = cases,
+      fill = cases,
+      text = tooltip_label
+    )
+  )+
+  geom_col() +
+  geom_text(aes(label = cases),
+            nudge_x = -10,
+            color = "white")+
+  labs(
+    x = "Nummber of Cases",
+    y = "Province"
+  ) +
+  theme_minimal()+
+  theme(legend.position = "none")+
+  scale_x_continuous(expand = expansion(mult = c(0, 0.1))) +
+  scale_fill_continuous(trans = "reverse")
+
+cases_by_province <- 
+  ggplotly(cases_by_prov, tooltip = "text")
+```
+
+```{r results='hide', message=FALSE, warning = FALSE}
+pacman::p_load(outbreaks, rgeoboundaries, plotly)
+
+### MAP OF CASES PER PROVINCE
+province_summary <- fluH7N9_china_2013 %>% 
+  group_by(province) %>% 
+  summarise(total_cases = n()) 
+
+china_map <- rgeoboundaries::gb_adm1("china")
+
+# Check the keys to see if join will be successful
+setdiff(province_summary$province, china_map$shapeName)
+setdiff(china_map$shapeName, province_summary$province)
+# Some work to be done to harmonize these
+
+china_map <- china_map %>%
+  # Remove the strings Province, Municipality and Autonomous Region 
+  # to allow matching
+  mutate(province = str_trim(
+    str_remove(shapeName, "Province|Municipality|Autonomous Region")
+  ))
+
+# Check if join will work fine
+setdiff(province_summary$province, china_map$province)
+
+# Fix Guangdong, which based on a quick Google is actually Guangzhou
+china_map <- china_map %>% 
+  mutate(province = if_else(province == "Guangzhou", "Guangdong", province)) 
+  
+# Check again
+setdiff(province_summary$province, china_map$province)
+
+# Now join
+china_map_joined <- 
+  left_join(china_map, province_summary, by = "province") %>% 
+  # Create tooltip label 
+  mutate(tooltip_label = paste0(province, ": ", total_cases))
+
+china_map_plot <- ggplot(china_map_joined) +
+  geom_sf(aes(fill = total_cases, text = tooltip_label)) + 
+  theme_void() +
+  labs(fill = "Number of Cases") + 
+  theme(legend.position = "none")
+
+china_map_plot_ggplotly <- 
+  ggplotly(china_map_plot, tooltip = "text")
+```
+
+
+
+
+# HOME 
+
+## Row 1 {height=25%}
+
+```{r}
+value_box(
+  title = "Total Cases",
+  value = total_cases,
+  showcase = bsicons::bs_icon("virus2"),
+  theme = "blue"
+)
+```
+
+```{r}
+value_box(
+  title = "Total Hospitalizations",
+  value = total_hosp,
+  showcase = bsicons::bs_icon("hospital"),
+  theme = value_box_theme(bg ="#518")
+)
+```
+
+```{r}
+value_box(
+  title = "Total Deaths",
+  value = total_deaths,
+  showcase = bsicons::bs_icon("exclude"),
+  theme = value_box_theme(bg ="#8B0000")
+)
+```
+
+## Row 2 {height=75%}
+
+### {width=30%}
+
+```{r title = "Number of Cases by Province"}
+cases_by_province
+  
+```
+
+
+### {width=70%}
+```{r title = "Map of Provinces by Number of Cases"}
+china_map_plot_ggplotly
+  
+```
+# DOWNLOAD DATA
+
+```{r}
+
+library(htmltools)
+
+htmltools::browsable(
+  tagList(
+    reactable(
+     fluH7N9_china_2013,
+     elementId = "fluH7N9_china_2013-table",
+     searchable = T,
+     filterable = T),
+    
+  tags$button("Download as CSV", 
+              onclick = "Reactable.downloadDataCSV('fluH7N9_china_2013-table')"),
+  )
+)
+
+
+
+```
